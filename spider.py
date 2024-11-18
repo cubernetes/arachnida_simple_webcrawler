@@ -2,13 +2,15 @@
 
 import re
 import os
-import sys
+import argparse
 from typing import Generator
 from urllib.parse import urlparse
 
 import requests
 from bs4 import BeautifulSoup
 
+VERBOSE = False
+DEFAULT_LEVEL = 5
 LINK_ELEMENTS = {
     'src': [
         'frame',
@@ -101,9 +103,10 @@ def find_urls(base_url: str, text: str) -> Generator[str, None, None]:
 
 def download_and_save(url: str, save_base_dir: str) -> None:
     dir, file = os.path.split(urlparse(url).path)
-    dest_dir = os.path.normpath(os.path.join(save_base_dir, './' + dir))
+    domain = urlparse(url).netloc
+    dest_dir = os.path.normpath(os.path.join(save_base_dir, os.path.join(domain, './' + dir)))
     if os.path.exists(dest_dir) and not os.path.isdir(dest_dir):
-        print(f'File {dest_dir} already exists and is not a directory.', file=sys.stderr, flush=True)
+        print(f'File {dest_dir} already exists and is not a directory.', flush=True)
         raise SystemExit(1)
     if not os.path.exists(dest_dir):
         try:
@@ -111,22 +114,57 @@ def download_and_save(url: str, save_base_dir: str) -> None:
         except OSError:
             print(f'Failed to create dir {dest_dir}')
             raise SystemExit(1)
-    print("Saving to", os.path.join(dest_dir, file))
+    dest_path = os.path.join(dest_dir, file)
+    if os.path.exists(dest_path):
+        print(f'Warning: file "{dest_path}" already exists, not downloading again', flush=True)
+        return
+    print(f'Downloading "{url}" to "{dest_path}"', flush=True)
+    resp = requests.get(url)
+    if resp.status_code != 200:
+        return
+    with open(dest_path, 'wb') as f:
+        f.write(resp.content)
 
-def crawl(url: str, depth: int, save_base_dir: str = './data') -> None:
-    if depth >= 0 and url.endswith(('.jpg', '.jpeg', '.png', '.gif', '.bmp')):
+def crawl(url: str, level: int, save_base_dir: str) -> None:
+    if VERBOSE:
+        print(f'Crawling {url}')
+    if level >= 0 and url.endswith(('.jpg', '.jpeg', '.png', '.gif', '.bmp')):
         download_and_save(url, save_base_dir)
         return
-    if depth == 0:
+    if level == 0:
         return
     resp = requests.get(url)
     if resp.status_code != 200:
         return
     text = resp.content.decode('utf-8', errors='ignore')
     for new_url in find_urls(url, text):
-        crawl(new_url, depth - 1, save_base_dir)
+        crawl(new_url, level - 1, save_base_dir)
 
 if __name__ == '__main__':
-    url = 'https://rolandschmidt.de'
-    depth = 2
-    crawl(url, depth)
+    parser = argparse.ArgumentParser(
+        prog='spider',
+        description='A simple DFS web crawler that downloads images from a URL',
+        usage='%(prog)s [options] <url>'
+    )
+    parser.add_argument('url', help='The url to crawl')
+    parser.add_argument('-r', '--recurse', action='store_true', help='Recursively download the images. Not specifing this option only tries to download the provided URL if it is an image')
+    parser.add_argument('-l', '--level', type=int, help='Maximum recursion level')
+    parser.add_argument('-p', '--path', default='./data', help='Path to directory where to download images to, default is ./data')
+    parser.add_argument('-v', '--verbose', default=False, action='store_true', help='Print what is being done')
+    args = parser.parse_args()
+    url = args.url
+    recurse = args.recurse
+    path = args.path
+    level = 0
+    VERBOSE = args.verbose
+    if args.recurse:
+        if args.level:
+            level = args.level
+        else:
+            level = DEFAULT_LEVEL
+    elif args.level:
+        print("Warning: -l/--level is ignored when not specifying -r/--recurse")
+    if level < 0:
+        print("Error: LEVEL must be at least 0")
+        raise SystemExit(1)
+    crawl(url, level, path)
