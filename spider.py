@@ -90,14 +90,17 @@ def make_url(base: str, path: str) -> str:
         return base + '/' + path
 
 def find_urls(base_url: str, text: str) -> Generator[str, None, None]:
-    soup = BeautifulSoup(text, 'html.parser')
     domain = urlparse(base_url).netloc
     protocol = 'https' if base_url.startswith('https') else 'http'
     base = protocol + '://' + domain
-    for attribute, elements in LINK_ELEMENTS.items():
-        for element in elements:
-            for link in soup.find_all(element, attrs={attribute: True}):
-                yield make_url(base, link[attribute])
+    try:
+        soup = BeautifulSoup(text, 'html.parser')
+        for attribute, elements in LINK_ELEMENTS.items():
+            for element in elements:
+                for link in soup.find_all(element, attrs={attribute: True}):
+                    yield make_url(base, link[attribute])
+    except Exception as e:
+        print("Warning: failed to parse html, skipping")
     for match in re.finditer(r'https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)', text):
         yield make_url(base, match.group(0))
 
